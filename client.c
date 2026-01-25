@@ -42,7 +42,7 @@ int main(int argc, char *argv[])
     // 예:  ./client (x)->./client 127.0.1 (o)
     if (argc != 2)
     {
-        fprintf(stderr, "usage:clint hostname\n");
+        fprintf(stderr, "usage:client hostname\n");
         exit(1);
     }
 

@@ -2,6 +2,8 @@
 #define _POSIX_C_SOURCE 200112L // 옛날 방식 말고 POSIX(유닉스 표준) 2001년 버전 이상 기능 사용 선언
 #define _XOPEN_SOURCE 700       // 최신 유닉스 기능 사용 선언
 
+#include <pthread.h> //thread 라이브러리!!->이건 표준 c 라이브러리에 없어서 컴파일 명령 시 따로 링크를 걸어줘야함 gcc server.c -o server -pthread
+
 // 기본 c언어 도구
 #include <stdio.h>  //standard input/output:printf()->출력,fprintf()->에러출력,perror()->에러 메시지 자동 출력
 #include <stdlib.h> //standard library. 프로그램을 강제 종료하거나 메모리 관련 일 할 때 씀. exit()->프로그램 즉시 종료.에러 시 사용
@@ -26,6 +28,33 @@
 #define PORT "3490" // 연결할 포트 번호
 #define BACKLOG 10  // 대기 인원 10
 
+// 새로 만든 스레드가 할 일을 정의하는 함수
+void *handle_client(void *arg)
+{
+    // 1.인자(소켓) 받아오기&메모리 해제
+    // arg는 힙 메모리의 주소. 거기로 가서 소켓 번호를 꺼내와야함(*붙이기)
+    int new_fd = *((int *)arg);
+
+    free(arg); // [중요] 소켓 번호 꺼냈으면 포장지(메모리)는 회수
+
+    // 2.알아서 죽은 스레드 사라짐(os가 자동으로 완전히 회수)
+    pthread_detach(pthread_self());
+
+    printf(">>>알바생:손님 받은! 10초동안 처리하는 척 함...\n");
+    sleep(10); // 10초 멈춤
+
+    // 3.손님한테 인사 메시지 전송
+    if (send(new_fd, "Hello,world", 13, 0) == -1)
+    {
+        perror("send");
+    }
+
+    // 4.전화 끊기
+    close(new_fd);
+
+    return NULL;
+}
+/*
 // 종료된 자식을 부모가 처리(좀비 방지)
 void sigchld_handler(int s)
 {
@@ -42,6 +71,7 @@ void sigchld_handler(int s)
 
     errno = saved_errno; // 4.에러 번호 복구
 }
+*/
 
 // 주소 변환 함수:ipv4인지 ipv6인지 확인해서 알맞은 ip 주소 위치를 뽑아줌
 // struct sockaddr은 겉표지일 뿐, 알맹이는 IPv4용 sockaddr_in과 IPv6용 sockaddr_in6구조체가 다름
@@ -135,6 +165,55 @@ int main(void)
         exit(1);
     }
 
+    while (1)
+    {
+        printf("server:waiting for connections...\n");
+
+        sin_size = sizeof their_addr;
+
+        // 1.대기타다가 손님 오면 'new_fd' 생성
+        new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+
+        // 생성 못하고 에러날 때
+        if (new_fd == -1)
+        {
+            perror("accept");
+            continue;
+        }
+
+        // 2. [중요] 소켓 번호 안전하게 복사
+        //->그냥 넘기면 worker_thread에서 그 주소값 읽기도 전에 메인 스레드가 while 루프 돌아서 다음 손님 번호를 new_fd에 덮어 쓸 수 있기 때문
+        int *client_socket = malloc(sizeof(int));
+        *client_socket = new_fd; // 힙메모리에 따로 공간 파서 복사해두고 그 포인터를 넘김
+
+        // 3.접속한 손님 IP 주소 찍어보기
+        inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
+        printf("server:got connection from %s\n", s);
+
+        // 4.스레드 id 변수 선언(os가 스레드 생성되면 고유 id 줌)
+        //->detach 쓸거면 이 id를 나중에 쓸 일은 없지만 pthread_create 함수가 무조건 id 적을 공간을 요구해서 형식 상 만듦
+        pthread_t worker_thread;
+
+        // 5.pthread_create 호출(handle_client 실행)해서 스레드 생성
+        //&worker_thread: 새로 만든 스레드 id 적을 변수의 주소
+        // NULL:스레드 우선순위/스택 크기는 일단 기본 설정으로
+        // handle_client:스레드 탄생하자마자 실행할 함수
+        // client_socket:힙메모리에 복사해둔 new_fd를 void *arg로 전달
+        if (pthread_create(&worker_thread, NULL, handle_client, client_socket))
+        {
+            perror("pthread_create");
+            // 스레드 생성 실패 시 메모리 해제하고 소켓 닫기
+            free(client_socket);
+            close(new_fd);
+        }
+
+        //[중요] 메인 스레드는 new_fd를 close하지 않음!! 스레드가 쓸거니까
+        // 메인 스레드는 다시 손님을 기다리러 while 처음으로 감
+    }
+
+    /*
+
+
     //[청소부 등록 과정] 자식 죽었다고 신호(SIGCHLD)가 오면 자동으로 청소부 함수 실행
     sa.sa_handler = sigchld_handler; // 청소부는 아까 만든 걔로 등록
     sigemptyset(&sa.sa_mask);
@@ -146,7 +225,7 @@ int main(void)
         exit(1);
     }
 
-    // 무한루프:손님 받기 accept()&fork()->여기장
+     // 무한루프:손님 받기 accept()&fork()->여기장
     while (1)
     {
         printf("server:waiting for connections...\n");
@@ -190,6 +269,7 @@ int main(void)
         // 이거 안 닫으면 부모한테 파일 스크립터가 쌓여서 서버 터짐계속
         close(new_fd);
     } // 다시 while문 처음으로 돌아가서 accpet 대기
+    */
 
     return 0;
 }
