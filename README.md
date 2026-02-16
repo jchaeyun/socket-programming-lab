@@ -33,16 +33,17 @@ Python 기반 부하 테스트 스크립트(benchmark.py)를 사용하여 3,000�
 htop 모니터링을 통해 모델별 OS 자원 할당 방식을 시각적으로 검증함.
 
 * Fork 모델: 각 연결이 고유한 PID를 할당받아 독립적으로 나열되는 것을 확인(List View).
-![alt text](<스크린샷 2026-02-16 044018.png>)
+![alt text](<스크린샷 2026-02-16 044108-1.png>)
 
 * Thread 모델: 하나의 부모 PID 아래 수천 개의 스레드가 트리 구조로 종속되어 실행되는 것을 확인(Tree View).
-![alt text](<스크린샷 2026-02-16 044108.png>)
+
+![alt text](<스크린샷 2026-02-16 044018-1.png>)
+
 
 ### 2. 시스템 한계와 확장성 (Scalability Error)
 
 동시 접속자를 8,000명으로 증설했을 때 RuntimeError: can't start new thread 발생을 확인하며 다음의 기술적 한계를 분석함.
 
-![alt text](<스크린샷 2026-02-16 044719.png>)
 
 * 원인: 리눅스 커널의 ulimit(max user processes 및 open files) 제한에 의한 시스템 자원 할당 거부 현상.
 * 결론: 단순한 Thread-per-connection 모델로는 수만 명 이상의 대규모 접속 처리에 한계가 있음을 체감함. 이를 해결하기 위한 I/O Multiplexing 및 Event-driven 모델의 필요성을 학습하는 계기가 됨.
